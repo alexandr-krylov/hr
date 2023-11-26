@@ -10,11 +10,13 @@ class TsReturnOperation extends ReferencesOperation
     /**
      * @throws \Exception
      */
-    public function doOperation(): void
+    public function doOperation(): array    //не верный тип возвращаемого значения
     {
         $data = (array)$this->getRequest('data');
-        $resellerId = $data['resellerId'];
-        $notificationType = (int)$data['notificationType'];
+        // а вдруг такого ключа нет или он не цифровой???
+        $resellerId = is_numeric($data['resellerId']) ? (int)$data['resellerId'] : null;
+        //$notificationType = (int)$data['notificationType'];// всегда будет целым есть оно или нет
+        $notificationType = is_numeric($data['notificationType']) ? (int)$data['notificationType'] : null;
         $result = [
             'notificationEmployeeByEmail' => false,
             'notificationClientByEmail'   => false,
@@ -24,36 +26,49 @@ class TsReturnOperation extends ReferencesOperation
             ],
         ];
 
-        if (empty((int)$resellerId)) {
+        //if (empty((int)$resellerId)) {  //всегда false
+        if (is_null($resellerId)) {
             $result['notificationClientBySms']['message'] = 'Empty resellerId';
             return $result;
         }
 
-        if (empty((int)$notificationType)) {
+        if (is_null($notificationType)) {
             throw new \Exception('Empty notificationType', 400);
         }
 
-        $reseller = Seller::getById((int)$resellerId);
+        $reseller = Seller::getById($resellerId);
         if ($reseller === null) {
             throw new \Exception('Seller not found!', 400);
         }
-
-        $client = Contractor::getById((int)$data['clientId']);
+        // Если вдруг $data['clientId'] не существует
+        $clientId = is_numeric($data['clientId']) ? (int)$data['clientId'] : null;
+        if (is_null($clientId)) {
+            throw new \Exception('Empty clientId!', 400);
+        }
+        $client = Contractor::getById($clientId);
         if ($client === null || $client->type !== Contractor::TYPE_CUSTOMER || $client->Seller->id !== $resellerId) {
-            throw new \Exception('сlient not found!', 400);
+            throw new \Exception('Client not found!', 400);
         }
 
         $cFullName = $client->getFullName();
-        if (empty($client->getFullName())) {
+        if (empty($client->getFullName())) {    // empty не годится для пробельной строки
             $cFullName = $client->name;
         }
 
-        $cr = Employee::getById((int)$data['creatorId']);
+        if (is_numeric($data['creatorId'])) {
+            $cr = Employee::getById((int)$data['creatorId']);
+        } else {
+            throw new \Exception('Empty creatorId!', 400);
+        }
         if ($cr === null) {
             throw new \Exception('Creator not found!', 400);
         }
 
-        $et = Employee::getById((int)$data['expertId']);
+        if (is_numeric($data['expertId'])) {
+            $et = Employee::getById((int)$data['expertId']);
+        } else {
+            throw new \Exception('Empty expertId', 400);
+        }
         if ($et === null) {
             throw new \Exception('Expert not found!', 400);
         }
@@ -67,17 +82,17 @@ class TsReturnOperation extends ReferencesOperation
                     'TO'   => Status::getName((int)$data['differences']['to']),
                 ], $resellerId);
         }
-
+//(int)null будет 0. не подходит для проверки на empty(). 
         $templateData = [
-            'COMPLAINT_ID'       => (int)$data['complaintId'],
+            'COMPLAINT_ID'       => is_numeric($data['complaintId']) ? (int)$data['complaintId'] : null,
             'COMPLAINT_NUMBER'   => (string)$data['complaintNumber'],
-            'CREATOR_ID'         => (int)$data['creatorId'],
+            'CREATOR_ID'         => is_numeric($data['creatorId']) ? (int)$data['creatorId'] : null,
             'CREATOR_NAME'       => $cr->getFullName(),
-            'EXPERT_ID'          => (int)$data['expertId'],
+            'EXPERT_ID'          => is_numeric($data['expertId']) ? (int)$data['expertId'] : null,
             'EXPERT_NAME'        => $et->getFullName(),
             'CLIENT_ID'          => (int)$data['clientId'],
             'CLIENT_NAME'        => $cFullName,
-            'CONSUMPTION_ID'     => (int)$data['consumptionId'],
+            'CONSUMPTION_ID'     => is_numeric($data['consumptionId']) ? (int)$data['consumptionId'] : null,
             'CONSUMPTION_NUMBER' => (string)$data['consumptionNumber'],
             'AGREEMENT_NUMBER'   => (string)$data['agreementNumber'],
             'DATE'               => (string)$data['date'],
@@ -124,6 +139,8 @@ class TsReturnOperation extends ReferencesOperation
             }
 
             if (!empty($client->mobile)) {
+                //если $error передаётся по ссылке
+                $error = '';
                 $res = NotificationManager::send($resellerId, $client->id, NotificationEvents::CHANGE_RETURN_STATUS, (int)$data['differences']['to'], $templateData, $error);
                 if ($res) {
                     $result['notificationClientBySms']['isSent'] = true;
